@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import re
+import sys
 from datetime import datetime
 import argparse
 import subb
@@ -74,6 +75,9 @@ class BuildPage:
         insert_or_up = 0
 
         for page in range(1, pages):
+
+            print("scanning page:", page)
+
             url = BuildPage.urls[tab]
             ccmd = "curl " + url
 
@@ -82,7 +86,7 @@ class BuildPage:
                     ccmd += f"?next={next_id}&n={next_n}"
             else:
                 if page > 1:
-                    ccmd += "?p=" + page
+                    ccmd += "?p=" + str(page)
 
             self.cmd.run(ccmd)
 
@@ -103,7 +107,7 @@ class BuildPage:
             all_match = list(set(all_match))
 
             if self.verbose:
-                print("page:", url, "posts:", all_match)
+                print("page:", ccmd, "posts:", all_match)
 
             insert_or_update = self.process_items(all_match, tab)
             if insert_or_update == 0:
@@ -307,7 +311,7 @@ class BuildPage:
         print("'Nobody has any intention of building a wall' Walter Ulbricht")
 
         self.cursor.execute(
-            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at"""
+            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at DESC"""
             #"""SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at"""
         )
         rows = self.cursor.fetchall()
@@ -455,6 +459,16 @@ Scanner for 'hacker news - red flag eddition' project
         "scann and build the page"
     )
 
+    # common arguments
+    group.add_argument(
+        "--verbose",
+        "-v",
+        default=False,
+        action="store_true",
+        dest="verbose",
+        help="trace all commands, verbose output",
+    )
+
     group.add_argument(
         "--db",
         "-b",
@@ -473,7 +487,6 @@ Scanner for 'hacker news - red flag eddition' project
         help="set posgress db name (for db connect)",
     )
 
-
     group.add_argument(
         "--host",
         "-n",
@@ -483,16 +496,7 @@ Scanner for 'hacker news - red flag eddition' project
         help="set postgress host (for db connect)",
     )
 
-
-    group.add_argument(
-        "--format",
-        "-f",
-        default=False,
-        action="store_true",
-        dest="format",
-        help="format the page from db content",
-    )
-
+    # crawling
     group.add_argument(
         "--init",
         "-i",
@@ -503,12 +507,41 @@ Scanner for 'hacker news - red flag eddition' project
     )
 
     group.add_argument(
-        "--verbose",
-        "-v",
+        "--crawl",
+        "-c",
         default=False,
         action="store_true",
-        dest="verbose",
-        help="trace all commands, verbose output",
+        dest="crawl",
+        help="crawl the hn site",
+    )
+
+    group.add_argument(
+        "--maxpage",
+        "-m",
+        default=4000,
+        type=int,
+        dest="maxpage",
+        help="maximum number of pages to crawl",
+    )
+
+    group.add_argument(
+        "--tab",
+        "-t",
+        default=0,
+        type=int,
+        dest="tab",
+        help="tab to crawl (0 - newest, 1 - new, 2 - ask, 3 - show)"
+    )
+
+
+    # formatting of site
+    group.add_argument(
+        "--format",
+        "-f",
+        default=False,
+        action="store_true",
+        dest="format",
+        help="format the page from db content",
     )
 
     return parse.parse_args()
@@ -523,13 +556,20 @@ def make_site():
 
     if args.format:
         page.format()
-    else:
-        # scan & crawl
+    elif args.crawl:
 
+        if args.tab < BuildPage.TAB_NEWEST or args.tab > BuildPage.TAB_SHOW:
+            print("Error: tab value invalid")
+            sys.exit(1)
+
+        # scan & crawl
         if args.init:
             page.make_tbl()
 
-        page.get_page_links(500, BuildPage.TAB_NEWEST)
+        page.get_page_links(args.maxpage, args.tab)
+    else:
+        print("Error: no action specified")
+        sys.exit(1)
 
 
 
