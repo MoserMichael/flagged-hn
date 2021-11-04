@@ -7,7 +7,7 @@ Here is the generated page [red flagged hackers news](https://mosermichael.githu
 
 The HN moderators are doing a good job, mostly - as you can see.
 
-let's wait and see what the reaction at the proper HN will be...
+let's wait and see what the reaction at the proper HN will be... Here is the [HN submission](https://news.ycombinator.com/item?id=29113079), let's see if it ends up being flagged too ;-)
     
 # Running the stuff
 
