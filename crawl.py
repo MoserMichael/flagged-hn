@@ -112,8 +112,8 @@ class BuildPage:
             insert_or_update = self.process_items(all_match, tab)
             if insert_or_update == 0:
                 insert_or_up += 1
-                if insert_or_up == 2:
-                    return page
+#                if insert_or_up == 2:
+#                    return page
             else:
                 insert_or_up = 0
 
