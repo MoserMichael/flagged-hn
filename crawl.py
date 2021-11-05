@@ -8,33 +8,13 @@ import subb
 import psycopg2
 
 
-class BuildPage:
-    STATUS_ACTIVE = 1
-    STATUS_FLAGGED = 2
-    STATUS_DELETED = 3
-
-    TAB_NEWEST = 0
-    TAB_MAIN = 1
-    TAB_ASK = 2
-    TAB_SHOW = 3
-
-    urls = [
-        "https://news.ycombinator.com/newest",
-        "https://news.ycombinator.com/news",
-        "https://news.ycombinator.com/ask",
-        "https://news.ycombinator.com/show",
-    ]
-
+class DBLayer:
     def __init__(self, verbose, dbname, user, host, password):
         self.conn = psycopg2.connect(
             f"dbname='{dbname}' user='{user}' host='{host}' password='{password}'"
         )
-        self.verbose = verbose
         self.cursor = self.conn.cursor()
-        self.cmd = subb.RunCommand() #trace_on=verbose)
-        self.epoch_seconds_now = int(datetime.now().strftime("%s"))
-        self.page_file = None
-
+        self.verbose = verbose
 
     def make_tbl(self):
         print("creating db tables...")
@@ -67,6 +47,95 @@ class BuildPage:
 
         self.conn.commit()
         print("db tables created!")
+
+    def find_non_active(self):
+        self.cursor.execute(
+            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at DESC"""
+            #"""SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at"""
+        )
+        return self.cursor.fetchall()
+
+
+    def find_post(self, entry_id):
+        self.cursor.execute(
+            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.entryid = %s""", (entry_id,)
+        )
+        rows = self.cursor.fetchall()
+
+        if len(rows) != 0:
+            if self.verbose:
+                print("key: ", entry_id, "found entry: ", rows)
+            row = rows[0]
+            return {
+                "entry_id": row[0],
+                "tab": row[1],
+                "title": row[2],
+                "nscore": int(row[3]),
+                "ncomments": int(row[4]),
+                "author": row[5],
+                "created_at": row[6],
+                "status": int(row[7]),
+            }
+
+        return None
+
+    def insert_post(self, rec, tab):
+        if self.verbose:
+            print("insert post record: ", rec, "tab:", tab)
+        insert_query = """INSERT INTO posts (entryid, tab, title, nscore, ncomments, author, created_at, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
+        item_tuple = (
+            rec["entry_id"],
+            tab,
+            rec["title"],
+            rec["nscore"],
+            rec["ncomments"],
+            rec["author"],
+            rec["created_at"],
+            rec["status"],
+        )
+        self.cursor.execute(insert_query, item_tuple)
+        self.conn.commit()
+
+    def update_post(self, rec, tab):
+        update_query = """UPDATE posts SET (tab, title, nscore, ncomments, author, created_at, status) = (%s, %s, %s, %s, %s, %s, %s) WHERE entryid = %s"""
+        item_tuple = (
+            tab,
+            rec["title"],
+            rec["nscore"],
+            rec["ncomments"],
+            rec["author"],
+            rec["created_at"],
+            rec["status"],
+            rec["entry_id"],
+        )
+        self.cursor.execute(update_query, item_tuple)
+        self.conn.commit()
+
+
+
+class BuildPage:
+    STATUS_ACTIVE = 1
+    STATUS_FLAGGED = 2
+    STATUS_DELETED = 3
+
+    TAB_NEWEST = 0
+    TAB_MAIN = 1
+    TAB_ASK = 2
+    TAB_SHOW = 3
+
+    urls = [
+        "https://news.ycombinator.com/newest",
+        "https://news.ycombinator.com/news",
+        "https://news.ycombinator.com/ask",
+        "https://news.ycombinator.com/show",
+    ]
+
+    def __init__(self, verbose, dbname, user, host, password):
+
+        self.dblayer = DBLayer(verbose, dbname, user, host, password)
+        self.verbose = verbose
+        self.cmd = subb.RunCommand() #trace_on=verbose)
+        self.epoch_seconds_now = int(datetime.now().strftime("%s"))
 
     def get_page_links(self, pages, tab):
 
@@ -124,14 +193,14 @@ class BuildPage:
 
         for entry_id in all_match:
 
-            rec = self.find_post(entry_id)
+            rec = self.dblayer.find_post(entry_id)
             if rec is None:
                 # new post
                 rec = self.fetch_item(entry_id)
                 if rec["valid"]:
                     if self.verbose:
                         print("post scanned: ", rec)
-                    self.insert_post(rec, tab)
+                    self.dblayer.insert_post(rec, tab)
                     insert_or_update += 1
             else:
                 if self.verbose:
@@ -160,65 +229,9 @@ class BuildPage:
                             or rec["nscore"] != check_rec["nscore"]
                             or rec["ncomments"] != check_rec["ncomments"]
                         ):
-                            self.update_post(check_rec, tab)
+                            self.dblayer.update_post(check_rec, tab)
                             insert_or_update += 1
         return insert_or_update
-
-    def find_post(self, entry_id):
-        self.cursor.execute(
-            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.entryid = %s""", (entry_id,)
-        )
-        rows = self.cursor.fetchall()
-
-        if len(rows) != 0:
-            if self.verbose:
-                print("key: ", entry_id, "found entry: ", rows)
-            row = rows[0]
-            return {
-                "entry_id": row[0],
-                "tab": row[1],
-                "title": row[2],
-                "nscore": int(row[3]),
-                "ncomments": int(row[4]),
-                "author": row[5],
-                "created_at": row[6],
-                "status": int(row[7]),
-            }
-
-        return None
-
-    def insert_post(self, rec, tab):
-        if self.verbose:
-            print("insert post record: ", rec, "tab:", tab)
-        insert_query = """INSERT INTO posts (entryid, tab, title, nscore, ncomments, author, created_at, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
-        item_tuple = (
-            rec["entry_id"],
-            tab,
-            rec["title"],
-            rec["nscore"],
-            rec["ncomments"],
-            rec["author"],
-            rec["created_at"],
-            rec["status"],
-        )
-        self.cursor.execute(insert_query, item_tuple)
-        self.conn.commit()
-
-    def update_post(self, rec, tab):
-        update_query = """UPDATE posts SET (tab, title, nscore, ncomments, author, created_at, status) = (%s, %s, %s, %s, %s, %s, %s) WHERE entryid = %s"""
-        item_tuple = (
-            tab,
-            rec["title"],
-            rec["nscore"],
-            rec["ncomments"],
-            rec["author"],
-            rec["created_at"],
-            rec["status"],
-            rec["entry_id"],
-        )
-        self.cursor.execute(update_query, item_tuple)
-        self.conn.commit()
-
 
     def fetch_item(self, entry_id):
         url = "https://news.ycombinator.com/item?id=" + entry_id
@@ -307,14 +320,18 @@ class BuildPage:
         print("find_pos_end:", find_pos_end, "len:", len(to_str), "find_pos:", find_pos)
         return self.cmd.output[find_pos_end + len(to_str) : find_pos]
 
+
+class FormatPage:
+    def __init__(self, verbose, dbname, user, host, password):
+        self.verbose = verbose
+        self.dblayer = DBLayer(verbose, dbname, user, host, password)
+        self.page_file = None
+
+
     def format(self):
         print("'Nobody has any intention of building a wall' Walter Ulbricht")
 
-        self.cursor.execute(
-            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at DESC"""
-            #"""SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at"""
-        )
-        rows = self.cursor.fetchall()
+        rows = self.dblayer.find_non_active()
 
         item = 0
         page_count = 1
@@ -552,11 +569,14 @@ def make_site():
 
     args = parse_cmd_line()
 
-    page = BuildPage(args.verbose, args.db, args.user, args.host, '')
-
     if args.format:
+
+        page = FormatPage(args.verbose, args.db, args.user, args.host, '')
+
         page.format()
     elif args.crawl:
+
+        page = BuildPage(args.verbose, args.db, args.user, args.host, '')
 
         if args.tab < BuildPage.TAB_NEWEST or args.tab > BuildPage.TAB_SHOW:
             print("Error: tab value invalid")
@@ -564,7 +584,7 @@ def make_site():
 
         # scan & crawl
         if args.init:
-            page.make_tbl()
+            page.dblayer.make_tbl()
 
         page.get_page_links(args.maxpage, args.tab)
     else:
