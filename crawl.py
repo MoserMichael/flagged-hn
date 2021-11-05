@@ -112,6 +112,40 @@ class DBLayer:
         self.conn.commit()
 
 
+# tool to help construct web crawlers
+class CrawlerUtil:
+    def __init__(self, verbose):
+        self.cmd = subb.RunCommand(trace_on=verbose)
+
+    def fetch_url(self, url):
+        self.cmd.run("curl " + url)
+
+    def page(self):
+        return self.cmd.output
+
+    def find_between(self, from_str, to_str):
+        find_pos = self.cmd.output.find(from_str)
+        if find_pos == -1:
+            return None
+        find_pos_end = self.cmd.output.find(to_str, find_pos + len(from_str))
+        if find_pos_end == -1:
+            return None
+        return self.cmd.output[find_pos + len(from_str) : find_pos_end]
+
+    def find_between_r(self, from_str, to_str):
+        find_pos = self.cmd.output.find(from_str)
+        if find_pos == -1:
+            print("can't find from_str:", from_str)
+            return None
+        find_pos_end = self.cmd.output.rfind(to_str, 0, find_pos)
+        if find_pos_end == -1:
+            print("can't find to_str:", to_str)
+            return None
+
+        print("find_pos_end:", find_pos_end, "len:", len(to_str), "find_pos:", find_pos)
+        return self.cmd.output[find_pos_end + len(to_str) : find_pos]
+
+
 
 class BuildPage:
     STATUS_ACTIVE = 1
@@ -133,8 +167,8 @@ class BuildPage:
     def __init__(self, verbose, dbname, user, host, password):
 
         self.dblayer = DBLayer(verbose, dbname, user, host, password)
+        self.crawl = CrawlerUtil(verbose)
         self.verbose = verbose
-        self.cmd = subb.RunCommand() #trace_on=verbose)
         self.epoch_seconds_now = int(datetime.now().strftime("%s"))
 
     def get_page_links(self, pages, tab):
@@ -148,26 +182,25 @@ class BuildPage:
             print("scanning page:", page)
 
             url = BuildPage.urls[tab]
-            ccmd = "curl " + url
 
             if tab == BuildPage.TAB_NEWEST:
                 if page > 1:
-                    ccmd += f"?next={next_id}&n={next_n}"
+                    url += f"?next={next_id}&n={next_n}"
             else:
                 if page > 1:
-                    ccmd += "?p=" + str(page)
+                    url += "?p=" + str(page)
 
-            self.cmd.run(ccmd)
+            self.crawl.fetch_url(url)
 
-            all_match = re.findall(r'href="item\?id=(\d*)"', self.cmd.output)
+            all_match = re.findall(r'href="item\?id=(\d*)"', self.crawl.page())
 
             if tab == BuildPage.TAB_NEWEST:
                 match = re.search(
-                    r'href="newest.next=(\d*)&amp;n=(\d+)"', self.cmd.output
+                    r'href="newest.next=(\d*)&amp;n=(\d+)"', self.crawl.page()
                 )
                 if match is None:
                     if self.verbose:
-                        print(f"no next page! url: {ccmd} page {page}")
+                        print(f"no next page! url: {url} page {page}")
                     return page
                 next_id = match.group(1)
                 next_n = match.group(2)
@@ -176,7 +209,7 @@ class BuildPage:
             all_match = list(set(all_match))
 
             if self.verbose:
-                print("page:", ccmd, "posts:", all_match)
+                print("page:",url, "posts:", all_match)
 
             insert_or_update = self.process_items(all_match, tab)
             if insert_or_update == 0:
@@ -237,7 +270,7 @@ class BuildPage:
         url = "https://news.ycombinator.com/item?id=" + entry_id
         if self.verbose:
             print("fetch item url:", url)
-        self.cmd.run(f"curl {url}")
+        self.crawl.fetch_url(url)
 
         valid = True
         title = ""
@@ -248,7 +281,7 @@ class BuildPage:
         num_comments = ""
 
         try:
-            title = self.find_between('<td class="title">', "</td>")
+            title = self.crawl.find_between('<td class="title">', "</td>")
             if title is None:
                 print("can't find title for url " + url)
                 raise ValueError()
@@ -259,25 +292,25 @@ class BuildPage:
             if title.find("[deleted]") != -1:
                 status = BuildPage.STATUS_DELETED
 
-            post_time = self.find_between(
+            post_time = self.crawl.find_between(
                 '<span class="age" title="', '"'
             )  # 2021-07-14T09:24:32
             if post_time is None:
                 print("can't find post time for url " + url)
                 raise ValueError()
 
-            author = self.find_between('class="hnuser">', "</a>")
+            author = self.crawl.find_between('class="hnuser">', "</a>")
             if author is None:
                 author = ""
 
-            score_raw = self.find_between('<span class="score"', "points</span>")
+            score_raw = self.crawl.find_between('<span class="score"', "points</span>")
             if score_raw is None or score_raw == "":
                 num_score = "0"
             else:
                 pos = score_raw.find(">")
                 num_score = score_raw[pos + 1 :]
 
-            num_comments = self.find_between_r("&nbsp;comments</a>", '">')
+            num_comments = self.crawl.find_between_r("&nbsp;comments</a>", '">')
             if num_comments is None or num_comments == "":
                 num_comments = "0"
 
@@ -297,28 +330,6 @@ class BuildPage:
             "created_at": datetime.fromisoformat(post_time),
             "status": status
         }
-
-    def find_between(self, from_str, to_str):
-        find_pos = self.cmd.output.find(from_str)
-        if find_pos == -1:
-            return None
-        find_pos_end = self.cmd.output.find(to_str, find_pos + len(from_str))
-        if find_pos_end == -1:
-            return None
-        return self.cmd.output[find_pos + len(from_str) : find_pos_end]
-
-    def find_between_r(self, from_str, to_str):
-        find_pos = self.cmd.output.find(from_str)
-        if find_pos == -1:
-            print("can't find from_str:", from_str)
-            return None
-        find_pos_end = self.cmd.output.rfind(to_str, 0, find_pos)
-        if find_pos_end == -1:
-            print("can't find to_str:", to_str)
-            return None
-
-        print("find_pos_end:", find_pos_end, "len:", len(to_str), "find_pos:", find_pos)
-        return self.cmd.output[find_pos_end + len(to_str) : find_pos]
 
 
 class FormatPage:
