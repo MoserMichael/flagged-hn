@@ -4,14 +4,15 @@ import re
 import sys
 from datetime import datetime
 import argparse
+import getpass
 import subb
 import psycopg2
 
 
 class DBLayer:
-    def __init__(self, verbose, dbname, user, host, password):
+    def __init__(self, verbose, dbparams):
         self.conn = psycopg2.connect(
-            f"dbname='{dbname}' user='{user}' host='{host}' password='{password}'"
+            f"dbname='{dbparams['dbname']}' user='{dbparams['user']}' host='{dbparams['host']}' password='{dbparams['pass']}'"
         )
         self.cursor = self.conn.cursor()
         self.verbose = verbose
@@ -27,6 +28,7 @@ class DBLayer:
             "   author VARCHAR(30),"
             "   created_at TIMESTAMPTZ,"
             "   status INTEGER,"
+            "   ispost BOOLEAN,"
             "   title TEXT"
             ")"
         )
@@ -50,15 +52,32 @@ class DBLayer:
 
     def find_non_active(self):
         self.cursor.execute(
-            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at DESC"""
-            #"""SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at"""
+            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status, ispost FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at DESC"""
+            #"""SELECT entryid, tab, title, nscore, ncomments, author, created_at, status, ispost FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at"""
         )
         return self.cursor.fetchall()
+
+    def find_post_latest(self, latest):
+        if latest:
+            self.cursor.execute(
+                """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status, ispost FROM posts pst WHERE pst.created_at = (SELECT MAX(created_at) from posts)"""
+            )
+        else:
+            self.cursor.execute(
+                """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status, ispost FROM posts pst WHERE pst.created_at = (SELECT MIN(created_at) from posts)"""
+            )
+        ret = self.cursor.fetchall()
+        if self.verbose:
+            print(ret)
+        if len(ret) == 0:
+            return None
+        return ret[0][0]
+
 
 
     def find_post(self, entry_id):
         self.cursor.execute(
-            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status FROM posts pst WHERE pst.entryid = %s""", (entry_id,)
+            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status, ispost FROM posts pst WHERE pst.entryid = %s""", (entry_id,)
         )
         rows = self.cursor.fetchall()
 
@@ -75,6 +94,7 @@ class DBLayer:
                 "author": row[5],
                 "created_at": row[6],
                 "status": int(row[7]),
+                "ispost": row[8]
             }
 
         return None
@@ -82,7 +102,7 @@ class DBLayer:
     def insert_post(self, rec, tab):
         if self.verbose:
             print("insert post record: ", rec, "tab:", tab)
-        insert_query = """INSERT INTO posts (entryid, tab, title, nscore, ncomments, author, created_at, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
+        insert_query = """INSERT INTO posts (entryid, tab, title, nscore, ncomments, author, created_at, status, ispost) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
         item_tuple = (
             rec["entry_id"],
             tab,
@@ -92,12 +112,13 @@ class DBLayer:
             rec["author"],
             rec["created_at"],
             rec["status"],
+            rec["ispost"]
         )
         self.cursor.execute(insert_query, item_tuple)
         self.conn.commit()
 
     def update_post(self, rec, tab):
-        update_query = """UPDATE posts SET (tab, title, nscore, ncomments, author, created_at, status) = (%s, %s, %s, %s, %s, %s, %s) WHERE entryid = %s"""
+        update_query = """UPDATE posts SET (tab, title, nscore, ncomments, author, created_at, status, ispost) = (%s, %s, %s, %s, %s, %s, %s, %s) WHERE entryid = %s"""
         item_tuple = (
             tab,
             rec["title"],
@@ -106,7 +127,8 @@ class DBLayer:
             rec["author"],
             rec["created_at"],
             rec["status"],
-            rec["entry_id"],
+            rec["ispost"],
+            rec["entry_id"]
         )
         self.cursor.execute(update_query, item_tuple)
         self.conn.commit()
@@ -115,10 +137,12 @@ class DBLayer:
 # tool to help construct web crawlers
 class CrawlerUtil:
     def __init__(self, verbose):
-        self.cmd = subb.RunCommand(trace_on=verbose)
+        self.cmd = subb.RunCommand() #trace_on=verbose)
+        self.verbose = verbose
 
     def fetch_url(self, url):
         self.cmd.run("curl " + url)
+        return self.cmd.exit_code == 0
 
     def page(self):
         return self.cmd.output
@@ -126,28 +150,33 @@ class CrawlerUtil:
     def find_between(self, from_str, to_str):
         find_pos = self.cmd.output.find(from_str)
         if find_pos == -1:
+            if self.verbose:
+                print("can't find to_str:", to_str)
             return None
         find_pos_end = self.cmd.output.find(to_str, find_pos + len(from_str))
         if find_pos_end == -1:
+            if self.verbose:
+                print("can't find to_str:", to_str)
             return None
         return self.cmd.output[find_pos + len(from_str) : find_pos_end]
 
     def find_between_r(self, from_str, to_str):
         find_pos = self.cmd.output.find(from_str)
         if find_pos == -1:
-            print("can't find from_str:", from_str)
+            if self.verbose:
+                print("can't find from_str:", from_str)
             return None
         find_pos_end = self.cmd.output.rfind(to_str, 0, find_pos)
         if find_pos_end == -1:
-            print("can't find to_str:", to_str)
+            if self.verbose:
+                print("can't find to_str:", to_str)
             return None
 
         print("find_pos_end:", find_pos_end, "len:", len(to_str), "find_pos:", find_pos)
         return self.cmd.output[find_pos_end + len(to_str) : find_pos]
 
-
-
-class BuildPage:
+# common hn crawler stuff
+class HNCrawlerUtil:
     STATUS_ACTIVE = 1
     STATUS_FLAGGED = 2
     STATUS_DELETED = 3
@@ -164,14 +193,183 @@ class BuildPage:
         "https://news.ycombinator.com/show",
     ]
 
-    def __init__(self, verbose, dbname, user, host, password):
-
-        self.dblayer = DBLayer(verbose, dbname, user, host, password)
-        self.crawl = CrawlerUtil(verbose)
+    def __init__(self, verbose, crawl):
         self.verbose = verbose
+        self.crawl = crawl
+
+    def fetch_entry_ids(self, url):
+        self.crawl.fetch_url(url)
+        ret = re.findall(r'href="item\?id=(\d*)"', self.crawl.page())
+        if self.verbose:
+            print("items in page: ", url, "items:", ret)
+        return ret
+
+    def fetch_item(self, entry_id):
+        url = "https://news.ycombinator.com/item?id=" + entry_id
+        if self.verbose:
+            print("fetch item url:", url)
+        self.crawl.fetch_url(url)
+
+        valid = True
+        title = ""
+        status = 0
+        post_time = ""
+        author = ""
+        num_score = ""
+        num_comments = ""
+        is_post = False
+
+        try:
+            title = self.crawl.find_between('<td class="title">', "</td>")
+            if title is None:
+                title = self.crawl.find_between('<td class="default">', '<div class="comment">')
+                if title is None:
+                    print("can't find title for url " + url)
+                    return None
+            else:
+                is_post = True
+
+            status = HNCrawlerUtil.STATUS_ACTIVE
+            if title.find("[flagged]") != -1:
+                status = HNCrawlerUtil.STATUS_FLAGGED
+            if title.find("[deleted]") != -1:
+                status = HNCrawlerUtil.STATUS_DELETED
+
+            post_time = self.crawl.find_between(
+                '<span class="age" title="', '"'
+            )  # 2021-07-14T09:24:32
+            if post_time is None:
+                print("can't find post time for url " + url)
+                raise ValueError()
+
+            author = self.crawl.find_between('class="hnuser">', "</a>")
+            if author is None:
+                author = ""
+
+            score_raw = self.crawl.find_between('<span class="score"', "points</span>")
+            if score_raw is None or score_raw == "":
+                num_score = "0"
+            else:
+                pos = score_raw.find(">")
+                num_score = score_raw[pos + 1 :]
+
+            num_comments = self.crawl.find_between_r("&nbsp;comments</a>", '">')
+            if num_comments is None or num_comments == "":
+                num_comments = "0"
+
+        except ValueError:
+            valid = False
+
+        if self.verbose:
+            print("Raw post fields: valid:", valid, "entry_id:", entry_id,  "nscore:", num_score, "ncomments:", num_comments, "author:", author, "created_at:", post_time, "status:", status, "ispost:", is_post, "title:", title)
+
+        return {
+            "valid": valid,
+            "entry_id": entry_id,
+            "title": title,
+            "nscore": int(num_score),
+            "ncomments": int(num_comments),
+            "author": author,
+            "created_at": datetime.fromisoformat(post_time),
+            "status": status,
+            "ispost": is_post
+        }
+
+class HHCrawlerOnEntryIdRange:
+    def __init__(self, verbose, entry_id_from, entry_id_to, dbparams):
+        self.entry_id_from = entry_id_from
+        self.entry_id_to = entry_id_to
+        self.verbose = verbose
+        self.dblayer = DBLayer(verbose, dbparams)
+
+        crawl = CrawlerUtil(verbose)
+
+        self.crawl = crawl
+        self.hncrawl = HNCrawlerUtil(verbose, crawl)
         self.epoch_seconds_now = int(datetime.now().strftime("%s"))
 
-    def get_page_links(self, pages, tab):
+
+    def scan(self):
+        if self.entry_id_from == -1:
+            self.entry_id_from = self.find_highest_entry_id()
+
+        while self.entry_id_from > self.entry_id_to:
+
+            entry_id = str(self.entry_id_from)
+            self.entry_id_from -= 1
+
+            rec = self.dblayer.find_post(entry_id)
+            if rec is None:
+                # new post
+                rec = self.hncrawl.fetch_item(entry_id)
+                if rec is None:
+                    continue
+                if rec["valid"]:
+                    if self.verbose:
+                        print("post scanned: ", rec)
+                    self.dblayer.insert_post(rec, 0)
+            else:
+                if self.verbose:
+                    print("existing post:", rec)
+                # created_at = datetime.fromisoformat(rec['created_at'])
+
+                epoch_seconds_post = int(rec["created_at"].strftime("%s"))
+                if (self.epoch_seconds_now - epoch_seconds_post) < (10 * 24 * 3600):
+                    # re check posts not older than ten days
+                    check_rec = self.hncrawl.fetch_item(entry_id)
+                    if check_rec is None:
+                        continue
+                    if check_rec["valid"]:
+                        status_changed = False
+                        if check_rec["status"] != rec["status"]:
+                            if self.verbose:
+                                print(
+                                    "status of ",
+                                    rec["entry_id"],
+                                    "changed from: ",
+                                    rec["status"],
+                                    "to:",
+                                    check_rec["status"],
+                                )
+                                status_changed = True
+                        if (
+                            status_changed
+                            or rec["nscore"] != check_rec["nscore"]
+                            or rec["ncomments"] != check_rec["ncomments"]
+                        ):
+                            self.dblayer.update_post(check_rec, 0)
+
+
+
+    def find_highest_entry_id(self):
+        url = "https://news.ycombinator.com/newcomments"
+        all_match = self.hncrawl.fetch_entry_ids(url)
+        max_entry = -1
+        for match in all_match:
+            if max_entry < int(match):
+                max_entry = int(match)
+
+        if self.verbose:
+            print("Highest entry_id: ", self.entry_id_from)
+
+        if max_entry == -1:
+            print("Error: can't find highest entry id")
+            sys.exit(1)
+
+        return max_entry
+
+class HNCrawlerFollowNextPage:
+    def __init__(self, verbose, dbparams):
+
+        self.dblayer = DBLayer(verbose, dbparams)
+        crawl = CrawlerUtil(verbose)
+
+        self.verbose = verbose
+        self.crawl = crawl
+        self.hncrawl = HNCrawlerUtil(verbose, crawl)
+        self.epoch_seconds_now = int(datetime.now().strftime("%s"))
+
+    def scan(self, pages, tab):
 
         print("starting the crawl: 'Forwaerts immer, rueckwaerts nimmer!'/'forward ever backward never' Erich Honecker ... max-page: ", pages)
 
@@ -181,20 +379,18 @@ class BuildPage:
 
             print("scanning page:", page)
 
-            url = BuildPage.urls[tab]
+            url = HNCrawlerUtil.urls[tab]
 
-            if tab == BuildPage.TAB_NEWEST:
+            if tab == HNCrawlerUtil.TAB_NEWEST:
                 if page > 1:
                     url += f"?next={next_id}&n={next_n}"
             else:
                 if page > 1:
                     url += "?p=" + str(page)
 
-            self.crawl.fetch_url(url)
+            all_match = self.hncrawl.fetch_entry_ids(url)
 
-            all_match = re.findall(r'href="item\?id=(\d*)"', self.crawl.page())
-
-            if tab == BuildPage.TAB_NEWEST:
+            if tab == HNCrawlerUtil.TAB_NEWEST:
                 match = re.search(
                     r'href="newest.next=(\d*)&amp;n=(\d+)"', self.crawl.page()
                 )
@@ -229,7 +425,10 @@ class BuildPage:
             rec = self.dblayer.find_post(entry_id)
             if rec is None:
                 # new post
-                rec = self.fetch_item(entry_id)
+                rec = self.hncrawl.fetch_item(entry_id)
+                if rec is None: 
+                    continue 
+
                 if rec["valid"]:
                     if self.verbose:
                         print("post scanned: ", rec)
@@ -243,7 +442,9 @@ class BuildPage:
                 epoch_seconds_post = int(rec["created_at"].strftime("%s"))
                 if (self.epoch_seconds_now - epoch_seconds_post) < (10 * 24 * 3600):
                     # re check posts not older than ten days
-                    check_rec = self.fetch_item(entry_id)
+                    check_rec = self.hncrawl.fetch_item(entry_id)
+                    if check_rec is None:
+                        continue
                     if check_rec["valid"]:
                         status_changed = False
                         if check_rec["status"] != rec["status"]:
@@ -266,76 +467,11 @@ class BuildPage:
                             insert_or_update += 1
         return insert_or_update
 
-    def fetch_item(self, entry_id):
-        url = "https://news.ycombinator.com/item?id=" + entry_id
-        if self.verbose:
-            print("fetch item url:", url)
-        self.crawl.fetch_url(url)
-
-        valid = True
-        title = ""
-        status = 0
-        post_time = ""
-        author = ""
-        num_score = ""
-        num_comments = ""
-
-        try:
-            title = self.crawl.find_between('<td class="title">', "</td>")
-            if title is None:
-                print("can't find title for url " + url)
-                raise ValueError()
-
-            status = BuildPage.STATUS_ACTIVE
-            if title.find("[flagged]") != -1:
-                status = BuildPage.STATUS_FLAGGED
-            if title.find("[deleted]") != -1:
-                status = BuildPage.STATUS_DELETED
-
-            post_time = self.crawl.find_between(
-                '<span class="age" title="', '"'
-            )  # 2021-07-14T09:24:32
-            if post_time is None:
-                print("can't find post time for url " + url)
-                raise ValueError()
-
-            author = self.crawl.find_between('class="hnuser">', "</a>")
-            if author is None:
-                author = ""
-
-            score_raw = self.crawl.find_between('<span class="score"', "points</span>")
-            if score_raw is None or score_raw == "":
-                num_score = "0"
-            else:
-                pos = score_raw.find(">")
-                num_score = score_raw[pos + 1 :]
-
-            num_comments = self.crawl.find_between_r("&nbsp;comments</a>", '">')
-            if num_comments is None or num_comments == "":
-                num_comments = "0"
-
-        except ValueError:
-            valid = False
-
-        if self.verbose:
-            print("Raw post fields: valid:", valid, "entry_id:", entry_id, "title:", title,  "nscore:", num_score, "ncomments:", num_comments, "author:", author, "created_at:", post_time, "status:", status)
-
-        return {
-            "valid": valid,
-            "entry_id": entry_id,
-            "title": title,
-            "nscore": int(num_score),
-            "ncomments": int(num_comments),
-            "author": author,
-            "created_at": datetime.fromisoformat(post_time),
-            "status": status
-        }
-
 
 class FormatPage:
-    def __init__(self, verbose, dbname, user, host, password):
+    def __init__(self, verbose, dbparams):
         self.verbose = verbose
-        self.dblayer = DBLayer(verbose, dbname, user, host, password)
+        self.dblayer = DBLayer(verbose, dbparams)
         self.page_file = None
 
 
@@ -479,16 +615,12 @@ Scanner for 'hacker news - red flag eddition' project
 
 
 """
-    parse = argparse.ArgumentParser(
+    parent_parser = argparse.ArgumentParser(
         description=usage, formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
-    group = parse.add_argument_group(
-        "scann and build the page"
-    )
-
     # common arguments
-    group.add_argument(
+    parent_parser.add_argument(
         "--verbose",
         "-v",
         default=False,
@@ -497,7 +629,7 @@ Scanner for 'hacker news - red flag eddition' project
         help="trace all commands, verbose output",
     )
 
-    group.add_argument(
+    parent_parser.add_argument(
         "--db",
         "-b",
         default="rf-hn",
@@ -506,7 +638,7 @@ Scanner for 'hacker news - red flag eddition' project
         help="set posgress db name (for db connect)",
     )
 
-    group.add_argument(
+    parent_parser.add_argument(
         "--user",
         "-u",
         default=os.getenv("USER"),
@@ -515,7 +647,7 @@ Scanner for 'hacker news - red flag eddition' project
         help="set posgress db name (for db connect)",
     )
 
-    group.add_argument(
+    parent_parser.add_argument(
         "--host",
         "-n",
         default="localhost",
@@ -524,8 +656,38 @@ Scanner for 'hacker news - red flag eddition' project
         help="set postgress host (for db connect)",
     )
 
-    # crawling
-    group.add_argument(
+    parent_parser.add_argument(
+        "--prompt",
+        "-p",
+        default=False,
+        action="store_true",
+        dest="prompt_password",
+        help="prompts for the db password"
+    )
+
+    subparsers = parent_parser.add_subparsers(dest='command')
+
+    parser = subparsers.add_parser('crawl', help='crawl hn (new crawler, crawls a range of entry ids')
+
+    parser.add_argument(
+        "--from",
+        "-f",
+        default=-1,
+        type=int,
+        dest="from_entry",
+        help="set highest entry id to start crawl (default: find the highest and start with it)"
+    )
+
+    parser.add_argument(
+        "--to",
+        "-t",
+        default=0,
+        type=int,
+        dest="to_entry",
+        help="set lowest entry id to start crawl"
+    )
+
+    parser.add_argument(
         "--init",
         "-i",
         default=False,
@@ -534,16 +696,20 @@ Scanner for 'hacker news - red flag eddition' project
         help="first run, create db table",
     )
 
-    group.add_argument(
-        "--crawl",
-        "-c",
+
+    parser = subparsers.add_parser('oldcrawl', help='crawl hn (old crawler, crawl the front page, then crawl the next page, etc)')
+
+    parser.add_argument(
+        "--init",
+        "-i",
         default=False,
         action="store_true",
-        dest="crawl",
-        help="crawl the hn site",
+        dest="init",
+        help="first run, create db table",
     )
 
-    group.add_argument(
+
+    parser.add_argument(
         "--maxpage",
         "-m",
         default=4000,
@@ -552,7 +718,7 @@ Scanner for 'hacker news - red flag eddition' project
         help="maximum number of pages to crawl",
     )
 
-    group.add_argument(
+    parser.add_argument(
         "--tab",
         "-t",
         default=0,
@@ -561,9 +727,10 @@ Scanner for 'hacker news - red flag eddition' project
         help="tab to crawl (0 - newest, 1 - new, 2 - ask, 3 - show)"
     )
 
+    parser = subparsers.add_parser('format', help='format the site')
 
     # formatting of site
-    group.add_argument(
+    parser.add_argument(
         "--format",
         "-f",
         default=False,
@@ -572,7 +739,28 @@ Scanner for 'hacker news - red flag eddition' project
         help="format the page from db content",
     )
 
-    return parse.parse_args()
+    parser = subparsers.add_parser('db', help='db commands')
+
+    parser.add_argument(
+        "--min-entryid",
+        "-m",
+        default=False,
+        action="store_true",
+        dest="min_entry",
+        help="show entry_id of the oldest entry",
+    )
+
+    parser.add_argument(
+        "--max-entryid",
+        "-x",
+        default=False,
+        action="store_true",
+        dest="max_entry",
+        help="show entry_id of the earliest entry",
+    )
+
+
+    return parent_parser.parse_args()
 
 
 
@@ -580,24 +768,52 @@ def make_site():
 
     args = parse_cmd_line()
 
-    if args.format:
+    db_pass = ''
+    if args.prompt_password:
+        db_pass = getpass.getpass(prompt="DB Password: ")
 
-        page = FormatPage(args.verbose, args.db, args.user, args.host, '')
+    dbparams = { 'dbname' : args.db, 'user': args.user, 'host': args.host, 'pass': db_pass }
+
+    if args.command == "format":
+
+        page = FormatPage(args.verbose, dbparams)
 
         page.format()
-    elif args.crawl:
 
-        page = BuildPage(args.verbose, args.db, args.user, args.host, '')
+    elif args.command == "crawl":
 
-        if args.tab < BuildPage.TAB_NEWEST or args.tab > BuildPage.TAB_SHOW:
+        crawler = HHCrawlerOnEntryIdRange(args.verbose, args.from_entry, args.to_entry, dbparams)
+
+        if args.init:
+            crawler.dblayer.make_tbl()
+
+        crawler.scan()
+
+
+    elif args.command == "oldcrawl":
+
+        crawler = HNCrawlerFollowNextPage(args.verbose, dbparams)
+
+        if args.tab < HNCrawlerUtil.TAB_NEWEST or args.tab > HNCrawlerUtil.TAB_SHOW:
             print("Error: tab value invalid")
             sys.exit(1)
 
         # scan & crawl
         if args.init:
-            page.dblayer.make_tbl()
+            crawler.dblayer.make_tbl()
 
-        page.get_page_links(args.maxpage, args.tab)
+        crawler.scan(args.maxpage, args.tab)
+
+    elif args.command == "db":
+
+        dblayer = DBLayer(args.verbose, dbparams)
+
+        if args.max_entry:
+            print( dblayer.find_post_latest(True) )
+
+        if args.min_entry:
+            print( dblayer.find_post_latest(False) )
+
     else:
         print("Error: no action specified")
         sys.exit(1)
