@@ -38,49 +38,84 @@ To create the db table, run the crawler with the ```-i``` option, ```-c``` optio
 (there are additional options to change the db host, db name, etc).
 
 ```
-./crawler -c -i
-```
-
-Run the crawler for the newest page (crawls a maximum of 300 pages)
-
-```
-./crawl.py -v -c  -m 300
-``` 
-
-Run the crawler for the main page (crawls a maximum of 300 pages)
-
-```
-./crawl.py -v -c -t 1 -m 300
+./crawler crawl -i
 ```
 
 Run the page generator, (after the crawler)
 
 ```
-./crawl.py -f
+./crawl.py format
 ```
 
 Here is the help blurb:
 
 ```
-./crawl.py -h
-usage: crawl.py [-h] [--verbose] [--db DB] [--user USER] [--host HOST] [--init] [--crawl] [--maxpage MAXPAGE] [--tab TAB] [--format]
+usage: crawl.py [-h] [--verbose] [--db DB] [--user USER] [--host HOST]
+                [--prompt]
+                {crawl,oldcrawl,format,db} ...
 
 Scanner for 'hacker news - red flag eddition' project
 
+positional arguments:
+  {crawl,oldcrawl,format,db}
+    crawl               crawl hn (new crawler, crawls a range of entry ids
+    oldcrawl            crawl hn (old crawler, crawl the front page, then
+                        crawl the next page, etc)
+    format              format the site
+    db                  db commands
+
 optional arguments:
   -h, --help            show this help message and exit
-
-scann and build the page:
   --verbose, -v         trace all commands, verbose output (default: False)
   --db DB, -b DB        set posgress db name (for db connect) (default: rf-hn)
-  --user USER, -u USER  set posgress db name (for db connect) (default: michaelmo)
-  --host HOST, -n HOST  set postgress host (for db connect) (default: localhost)
-  --init, -i            first run, create db table (default: False)
-  --crawl, -c           crawl the hn site (default: False)
-  --maxpage MAXPAGE, -m MAXPAGE
-                        maximum number of pages to crawl (default: 4000)
-  --tab TAB, -t TAB     tab to crawl (0 - newest, 1 - new, 2 - ask, 3 - show) (default: 0)
-  --format, -f          format the page from db content (default: False)
+  --user USER, -u USER  set posgress db name (for db connect) (default:
+                        michaelmo)
+  --host HOST, -n HOST  set postgress host (for db connect) (default:
+                        localhost)
+  --prompt, -p          prompts for the db password (default: False)
 
+```
+
+Help for ``crawl``` sub command
+```
+usage: crawl.py crawl [-h] [--from FROM_ENTRY] [--to TO_ENTRY] [--init]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --from FROM_ENTRY, -f FROM_ENTRY
+                        set highest entry id to start crawl (default: find the
+                        highest and start with it)
+  --to TO_ENTRY, -t TO_ENTRY
+                        set lowest entry id to start crawl
+  --init, -i            first run, create db table
+
+```
+
+Help for ```oldcrawl``` subcommand
+
+```
+usage: crawl.py oldcrawl [-h] [--init] [--maxpage MAXPAGE] [--tab TAB]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --init, -i            first run, create db table
+  --maxpage MAXPAGE, -m MAXPAGE
+                        maximum number of pages to crawl
+  --tab TAB, -t TAB     tab to crawl (0 - newest, 1 - new, 2 - ask, 3 - show)
+```
+Help for ```format``` subcommand
+
+```
+usage: crawl.py format [-h] [--format]
+
+optional arguments:
+  -h, --help    show this help message and exit
+  --format, -f  format the page from db content
+usage: crawl.py db [-h] [--min-entryid] [--max-entryid]
+
+optional arguments:
+  -h, --help         show this help message and exit
+  --min-entryid, -m  show entry_id of the oldest entry
+  --max-entryid, -x  show entry_id of the earliest entry
 ```
 
