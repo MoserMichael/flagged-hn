@@ -8,8 +8,13 @@ Here is the generated page [red flagged hackers news](https://mosermichael.githu
 The HN moderators are doing a good job, mostly - as you can see.
 
 let's wait and see what the reaction at the proper HN will be... Here is the [HN submission](https://news.ycombinator.com/item?id=29113079), let's see if it ends up being flagged too ;-)
-    
+
+Wow! I did cause them to change: now they flag stories, and the title is thereby deleted. Now you only see [flagged] in the title. That makes my little exercise here much less useful.
+That's also a lesson: crawlers can be made ineffective by slight changes in the input. At least i learned something in the process...
+
 # Running the stuff
+
+There is still a point to use this stuff, if you want to create your own database of HN post: here is the usage.
 
 ## running the crawler
 

@@ -50,9 +50,9 @@ class DBLayer:
         self.conn.commit()
         print("db tables created!")
 
-    def find_non_active(self):
+    def find_non_active(self, ispost):
         self.cursor.execute(
-            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status, ispost FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at DESC"""
+            """SELECT entryid, tab, title, nscore, ncomments, author, created_at, status, ispost FROM posts pst WHERE pst.status <> 1 AND pst.ispost is %s ORDER BY pst.created_at DESC""", (ispost,)
             #"""SELECT entryid, tab, title, nscore, ncomments, author, created_at, status, ispost FROM posts pst WHERE pst.status <> 1 ORDER BY pst.created_at"""
         )
         return self.cursor.fetchall()
@@ -478,7 +478,7 @@ class FormatPage:
     def format(self):
         print("'Nobody has any intention of building a wall' Walter Ulbricht")
 
-        rows = self.dblayer.find_non_active()
+        rows = self.dblayer.find_non_active(true)
 
         item = 0
         page_count = 1
