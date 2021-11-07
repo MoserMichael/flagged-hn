@@ -9,8 +9,10 @@ The HN moderators are doing a good job, mostly - as you can see.
 
 let's wait and see what the reaction at the proper HN will be... Here is the [HN submission](https://news.ycombinator.com/item?id=29113079), let's see if it ends up being flagged too ;-)
 
-Wow! I did cause them to change: now they flag stories, and the title is thereby deleted. Now you only see [flagged] in the title. That makes my little exercise here much less useful.
-That's also a lesson: crawlers can be made ineffective by slight changes in the input. At least i learned something in the process...
+Wow! I did cause them to change: now they flag stories, but they also delete the title from the story, like [here](https://news.ycombinator.com/item?id=29134228) ; someone has been reading my submission. Now you only see [flagged] in the title. That makes my little exercise here much less useful. That's also a lesson: crawlers can be made ineffective by slight changes in the input. At least i had some fun at making this little exercise...
+
+
+On the other side: it makes [HN](https://news.ycombinator.com/) a bit less interesting.  I am sorry for having caused this, i had the best of intentions.
 
 # Running the stuff
 
