@@ -426,8 +426,8 @@ class HNCrawlerFollowNextPage:
             if rec is None:
                 # new post
                 rec = self.hncrawl.fetch_item(entry_id)
-                if rec is None: 
-                    continue 
+                if rec is None:
+                    continue
 
                 if rec["valid"]:
                     if self.verbose:
@@ -469,35 +469,63 @@ class HNCrawlerFollowNextPage:
 
 
 class FormatPage:
+
+    title = (
+            'link to flagged comments',
+            'link to flagged submissions'
+            )
+
+    link = (
+            "comments_1.html",
+            "page_1.html",
+           )
+
     def __init__(self, verbose, dbparams):
         self.verbose = verbose
         self.dblayer = DBLayer(verbose, dbparams)
         self.page_file = None
+        self.prefix = None
+        self.title_idx = 0
 
 
     def format(self):
         print("'Nobody has any intention of building a wall' Walter Ulbricht")
 
-        rows = self.dblayer.find_non_active(true)
+        self.title_idx = 0
+        self.prefix = "page_"
+        self.format_one(True)
+
+        self.title_idx = 1
+        self.prefix = "comments_"
+        self.format_one(False)
+
+
+    def format_one(self, show_articles):
+
+        print("format:", show_articles)
+
+        rows = self.dblayer.find_non_active(show_articles)
 
         item = 0
         page_count = 1
+
         for row in rows:
-            if item ==0 or item % 31 == 0:
+            if item == 0:
                 self.show_page_header(page_count)
                 page_count += 1
+                item = 1
 
-            self.show_item((item + 1) % 30, row)
+            item += self.show_item(item, row, show_articles)
 
-            if item != 0 and item % 30 == 0:
-                self.show_page_footer(page_count+1)
-            item += 1
+            if item == 31:
+                self.show_page_footer(page_count-1)
+                item = 0
 
-        if (item - 1) % 30 == 0:
-            self.show_page_footer(page_count)
+        if item != 0:
+            self.show_page_footer(page_count-1)
 
 
-    def show_item(self, item_num, row):
+    def show_item(self, item_num, row, show_articles):
         if self.verbose:
             print("item:", item_num, "row:", row)
 
@@ -509,6 +537,20 @@ class FormatPage:
         created_at = row[6]
         time_str = created_at.strftime("%d/%m/%y")
         time_str_hint = created_at.strftime("%Y-%m-%d%z%H:%M:%S")
+
+        # too lazy to fix up the crawler, instead fudge with the title...
+        if not show_articles:
+            idx = title.find("on:")
+            title = title[idx:]
+            idx = title.find("</span>")
+            title = title[:idx]
+            title = title.replace('<a href="item?','<a href="https://news.ycombinator.com/item?')
+
+
+        if title == "[flagged]":
+            if self.verbose:
+                print("item {entry_id} flagged into oblivion. nothing to show here...")
+            return 0
 
         #dirty hack, to fix hn link to items from the same site.
         title=title.replace("from?site=", "https://news.ycombinator.com/from?site=")
@@ -524,8 +566,9 @@ class FormatPage:
           </a>
        </center>
     </td>
+
     <td class="title">{title}</td>
- </tr>
+    </tr>
  <tr>
     <td colspan="2"></td>
     <td class="subtext">
@@ -534,6 +577,7 @@ class FormatPage:
  </tr>
  <!-- item end //-->
 """, file=self.page_file)
+        return 1
 
 
     def show_page_footer(self, page_number):
@@ -547,9 +591,8 @@ class FormatPage:
             <td colspan="2"></td>
             <td class="title">
               <a
-                href="newest?next=29106308&amp;n=31"
+                href="{self.prefix}{page_number+1}.html"
                 class="morelink"
-                rel="page_{page_number+1}.html"
                 >More</a
               >
             </td>
@@ -567,9 +610,9 @@ class FormatPage:
         if self.verbose:
             print(f"show page footer {page_number}")
 
-        self.page_file = open(f"page_{page_number}.html", "w")
+        self.page_file = open(f"{self.prefix}{page_number}.html", "w")
 
-        print( """
+        print( f"""
 <html lang="en" op="newest">
    <head>
       <meta name="referrer" content="origin">
@@ -581,6 +624,9 @@ class FormatPage:
 <body>
       <center>
         <img src="data/hn3.png" style="width: 75vw"/>
+        <br/>
+        <a href="{FormatPage.link[ self.title_idx ]}" align="left">{FormatPage.title[ self.title_idx ]}</a>
+        <br/>
         <table id="hnmain" border="0" cellpadding="0" cellspacing="0" width="85%" bgcolor="#f6f6ef">
             <tr>
                <td bgcolor="#ff6600">
