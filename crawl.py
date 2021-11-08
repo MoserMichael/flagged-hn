@@ -544,8 +544,9 @@ class FormatPage:
             title = title[idx:]
             idx = title.find("</span>")
             title = title[:idx]
-            title = title.replace('<a href="item?','<a href="https://news.ycombinator.com/item?')
 
+        # fix relative links in the title. (hacky hack)
+        title = title.replace('<a href="item?','<a href="https://news.ycombinator.com/item?')
 
         if title == "[flagged]":
             if self.verbose:
